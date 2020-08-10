@@ -15,6 +15,7 @@ use Gesdinet\JWTRefreshTokenBundle\Model\RefreshTokenInterface;
 use Gesdinet\JWTRefreshTokenBundle\Model\RefreshTokenManagerInterface;
 use Gesdinet\JWTRefreshTokenBundle\Request\RequestRefreshToken;
 use Lexik\Bundle\JWTAuthenticationBundle\Event\AuthenticationSuccessEvent;
+use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -58,6 +59,11 @@ class AttachRefreshTokenOnSuccessListener
     protected $singleUse;
 
     /**
+     * @var array
+     */
+    protected $cookie;
+
+    /**
      * AttachRefreshTokenOnSuccessListener constructor.
      *
      * @param RefreshTokenManagerInterface $refreshTokenManager
@@ -67,6 +73,7 @@ class AttachRefreshTokenOnSuccessListener
      * @param string                       $userIdentityField
      * @param string                       $tokenParameterName
      * @param bool                         $singleUse
+     * @param array                        $cookie
      */
     public function __construct(
         RefreshTokenManagerInterface $refreshTokenManager,
@@ -75,7 +82,8 @@ class AttachRefreshTokenOnSuccessListener
         RequestStack $requestStack,
         $userIdentityField,
         $tokenParameterName,
-        $singleUse
+        $singleUse,
+        $cookie
     ) {
         $this->refreshTokenManager = $refreshTokenManager;
         $this->ttl = $ttl;
@@ -84,6 +92,7 @@ class AttachRefreshTokenOnSuccessListener
         $this->userIdentityField = $userIdentityField;
         $this->tokenParameterName = $tokenParameterName;
         $this->singleUse = $singleUse;
+        $this->cookie = $cookie;
     }
 
     public function attachRefreshToken(AuthenticationSuccessEvent $event)
@@ -107,9 +116,7 @@ class AttachRefreshTokenOnSuccessListener
             }
         }
 
-        if ($refreshTokenString) {
-            $data[$this->tokenParameterName] = $refreshTokenString;
-        } else {
+        if (!$refreshTokenString) {
             $datetime = new \DateTime();
             $datetime->modify('+'.$this->ttl.' seconds');
 
@@ -137,9 +144,27 @@ class AttachRefreshTokenOnSuccessListener
             }
 
             $this->refreshTokenManager->save($refreshToken);
-            $data[$this->tokenParameterName] = $refreshToken->getRefreshToken();
+            $refreshTokenString = $refreshToken->getRefreshToken();
         }
 
-        $event->setData($data);
+        if($this->cookie) {
+            $event->getResponse()->headers->setCookie(
+                new Cookie(
+                    $this->tokenParameterName,
+                    $refreshTokenString,
+                    time() + $this->ttl,
+                    $this->cookie['path'],
+                    $this->cookie['domain'],
+                    $this->cookie['secure'],
+                    $this->cookie['httpOnly'],
+                    false,
+                    $this->cookie['sameSite']
+                )
+            );
+        } else {
+            $data[$this->tokenParameterName] = $refreshTokenString;
+
+            $event->setData($data);
+        }
     }
 }
