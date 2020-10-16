@@ -16,6 +16,7 @@ use Gesdinet\JWTRefreshTokenBundle\Model\RefreshTokenManagerInterface;
 use Gesdinet\JWTRefreshTokenBundle\Request\RequestRefreshToken;
 use Lexik\Bundle\JWTAuthenticationBundle\Event\AuthenticationSuccessEvent;
 use Symfony\Component\HttpFoundation\Cookie;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -59,6 +60,11 @@ class AttachRefreshTokenOnSuccessListener
     protected $singleUse;
 
     /**
+     * @var bool
+     */
+    protected $ttlUpdate;
+
+    /**
      * @var array
      */
     protected $cookie;
@@ -83,6 +89,7 @@ class AttachRefreshTokenOnSuccessListener
         $userIdentityField,
         $tokenParameterName,
         $singleUse,
+        $ttlUpdate,
         $cookie
     ) {
         $this->refreshTokenManager = $refreshTokenManager;
@@ -92,6 +99,7 @@ class AttachRefreshTokenOnSuccessListener
         $this->userIdentityField = $userIdentityField;
         $this->tokenParameterName = $tokenParameterName;
         $this->singleUse = $singleUse;
+        $this->ttlUpdate = $ttlUpdate;
         $this->cookie = $cookie;
     }
 
@@ -105,16 +113,7 @@ class AttachRefreshTokenOnSuccessListener
             return;
         }
 
-        $refreshTokenString = RequestRefreshToken::getRefreshToken($request, $this->tokenParameterName);
-
-        if ($refreshTokenString && true === $this->singleUse) {
-            $refreshToken = $this->refreshTokenManager->get($refreshTokenString);
-            $refreshTokenString = null;
-
-            if ($refreshToken instanceof RefreshTokenInterface) {
-                $this->refreshTokenManager->delete($refreshToken);
-            }
-        }
+        $refreshTokenString = $this->getRefreshTokenString($request);
 
         if (!$refreshTokenString) {
             $datetime = new \DateTime();
@@ -166,5 +165,30 @@ class AttachRefreshTokenOnSuccessListener
 
             $event->setData($data);
         }
+    }
+
+    protected function getRefreshTokenString(Request $request)
+    {
+        $refreshTokenString = RequestRefreshToken::getRefreshToken($request, $this->tokenParameterName);
+
+        if ($refreshTokenString) {
+            $refreshToken = $this->refreshTokenManager->get($refreshTokenString);
+
+            if (!($refreshToken instanceof RefreshTokenInterface)) {
+                return null;
+            }
+
+            if (true === $this->singleUse) {
+                $this->refreshTokenManager->delete($refreshToken);
+                $refreshToken = null;
+            } elseif (true === $this->ttlUpdate) {
+                $datetime = new \DateTime();
+                $datetime->modify('+'.$this->ttl.' seconds');
+                $refreshToken->setValid($datetime);
+                $this->refreshTokenManager->save($refreshToken);
+            }
+        }
+
+        return $refreshTokenString;
     }
 }
